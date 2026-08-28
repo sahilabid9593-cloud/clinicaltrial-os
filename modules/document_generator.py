@@ -127,7 +127,3 @@ if __name__ == "__main__":
     cursor.execute("SELECT nct_id FROM trials LIMIT 1")
     row = cursor.fetchone()
     conn.close()
-
-    if row:
-        print(f"Generating report for: {row[0]}")
-        generate_report(row[0])
