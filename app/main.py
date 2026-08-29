@@ -9,6 +9,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from modules.protocol_intelligence import analyze_protocol
 from modules.knowledge_graph import build_graph, find_sponsor_trials, get_graph_stats
 from modules.document_generator import generate_report
+from modules.recruitment_prediction import predict_recruitment
+from modules.site_selection import rank_sites
 
 st.set_page_config(
     page_title="ClinicalTrial OS",
@@ -26,9 +28,11 @@ page = st.sidebar.radio("Navigate", [
     "🔍 Search Trials",
     "🧠 Protocol Intelligence",
     "🕸️ Knowledge Graph",
-    "📄 Generate Report"
+    "📄 Generate Report",
+    "📈 Recruitment Prediction",
+    "🏥 Site Selection",
+    "📊 Analytics"
 ])
-
 # ─── HOME ───
 if page == "🏠 Home":
     st.title("🧬 ClinicalTrial OS")
@@ -169,3 +173,76 @@ elif page == "📄 Generate Report":
         st.success(f"Report saved to reports/{nct_id}_report.pdf")
         st.balloons()
         st.info("Open the reports/ folder in VS Code to see your PDF")
+        # ─── RECRUITMENT PREDICTION ───
+elif page == "📈 Recruitment Prediction":
+    st.title("📈 Recruitment Prediction")
+    st.markdown("Predict how long patient recruitment will take")
+    st.markdown("---")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        phase = st.selectbox("Trial Phase", 
+            ["PHASE1", "PHASE2", "PHASE3", "PHASE4"])
+    with col2:
+        enrollment = st.number_input("Target Enrollment", 
+            min_value=10, max_value=10000, value=500)
+
+    if st.button("Predict Recruitment", type="primary"):
+        with st.spinner("Running prediction model..."):
+            result = predict_recruitment(phase, enrollment)
+        
+        col1, col2 = st.columns(2)
+        col1.metric("Recruitment Speed", result["recruitment_speed"])
+        col2.metric("Estimated Timeline", result["estimated_timeline"])
+        st.info(result["recommendation"])
+
+# ─── SITE SELECTION ───
+elif page == "🏥 Site Selection":
+    st.title("🏥 Site Selection")
+    st.markdown("Find the best sites to run your trial")
+    st.markdown("---")
+
+    disease = st.text_input("Disease area", "diabetes")
+    
+    if st.button("Rank Sites", type="primary"):
+        with st.spinner("Analyzing sites..."):
+            df = rank_sites(disease)
+        st.success(f"Top sites for {disease} trials")
+        st.dataframe(df, use_container_width=True)
+
+# ─── ANALYTICS ───
+elif page == "📊 Analytics":
+    st.title("📊 Trial Analytics")
+    st.markdown("Visual insights from clinical trial data")
+    st.markdown("---")
+
+    import plotly.express as px
+
+    conn = sqlite3.connect("database/trials.db")
+    df = pd.read_sql("SELECT * FROM trials", conn)
+    conn.close()
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("### Trials by Status")
+        status_counts = df["status"].value_counts().reset_index()
+        status_counts.columns = ["Status", "Count"]
+        fig = px.bar(status_counts, x="Status", y="Count",
+                    color="Count", color_continuous_scale="Blues")
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        st.markdown("### Trials by Phase")
+        phase_counts = df["phase"].value_counts().reset_index()
+        phase_counts.columns = ["Phase", "Count"]
+        fig2 = px.pie(phase_counts, names="Phase", values="Count")
+        st.plotly_chart(fig2, use_container_width=True)
+
+    st.markdown("### Top 10 Sponsors by Trial Count")
+    sponsor_counts = df["sponsor"].value_counts().head(10).reset_index()
+    sponsor_counts.columns = ["Sponsor", "Trials"]
+    fig3 = px.bar(sponsor_counts, x="Trials", y="Sponsor",
+                 orientation="h", color="Trials",
+                 color_continuous_scale="Teal")
+    st.plotly_chart(fig3, use_container_width=True)
