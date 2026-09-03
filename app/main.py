@@ -31,7 +31,10 @@ page = st.sidebar.radio("Navigate", [
     "📄 Generate Report",
     "📈 Recruitment Prediction",
     "🏥 Site Selection",
-    "📊 Analytics"
+    "📊 Analytics",
+    "⚠️ Risk Prediction",
+    "✅ Compliance Check",
+    "💊 Pharmacovigilance"
 ])
 # ─── HOME ───
 if page == "🏠 Home":
@@ -246,3 +249,90 @@ elif page == "📊 Analytics":
                  orientation="h", color="Trials",
                  color_continuous_scale="Teal")
     st.plotly_chart(fig3, use_container_width=True)
+    # ─── RISK PREDICTION ───
+elif page == "⚠️ Risk Prediction":
+    st.title("⚠️ Trial Risk Prediction")
+    st.markdown("Predict if a trial is at risk of failure")
+    st.markdown("---")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        phase = st.selectbox("Trial Phase",
+            ["PHASE1", "PHASE2", "PHASE3", "PHASE4"])
+        enrollment = st.number_input("Target Enrollment",
+            min_value=10, max_value=10000, value=500)
+    with col2:
+        sponsor = st.text_input("Sponsor Name", "Small Biotech Inc")
+
+    if st.button("Predict Risk", type="primary"):
+        from modules.risk_prediction import predict_risk
+        with st.spinner("Analyzing risk factors..."):
+            result = predict_risk(phase, enrollment, sponsor)
+
+        col1, col2 = st.columns(2)
+        col1.metric("Risk Score", f"{result['risk_score']}%")
+        col2.metric("Risk Level", result["risk_level"])
+
+        if result["risk_level"] == "LOW":
+            st.success(result["advice"])
+        elif result["risk_level"] == "MEDIUM":
+            st.warning(result["advice"])
+        else:
+            st.error(result["advice"])
+
+# ─── COMPLIANCE CHECK ───
+elif page == "✅ Compliance Check":
+    st.title("✅ Regulatory Compliance Check")
+    st.markdown("Check if a trial meets ICH GCP requirements")
+    st.markdown("---")
+
+    nct_id = st.text_input("Enter NCT ID", "NCT00035906")
+
+    if st.button("Check Compliance", type="primary"):
+        from modules.regulatory_compliance import check_compliance
+        with st.spinner("Checking GCP compliance..."):
+            result = check_compliance(nct_id)
+
+        if result:
+            col1, col2 = st.columns(2)
+            col1.metric("Compliance Score", f"{result['compliance_score']:.0f}%")
+            col2.metric("Status", result["status"])
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("### ✅ Passed")
+                for item in result["passed"]:
+                    st.success(item)
+            with col2:
+                st.markdown("### ❌ Failed")
+                for item in result["failed"]:
+                    st.error(item)
+
+            st.markdown("### AI Analysis")
+            st.info(result.get("ai_analysis", ""))
+
+# ─── PHARMACOVIGILANCE ───
+elif page == "💊 Pharmacovigilance":
+    st.title("💊 Pharmacovigilance")
+    st.markdown("Real adverse event data from FDA FAERS database")
+    st.markdown("---")
+
+    drug = st.text_input("Enter drug name", "metformin")
+
+    if st.button("Get Adverse Events", type="primary"):
+        from modules.pharmacovigilance import get_adverse_events
+        with st.spinner("Fetching FDA data..."):
+            result = get_adverse_events(drug)
+
+        if result:
+            st.success(f"Found {result['total_events_found']} adverse events")
+            st.caption("Source: FDA FAERS Database — Real Data")
+
+            import plotly.express as px
+            df = pd.DataFrame(result["top_events"])
+            fig = px.bar(df, x="count", y="event",
+                        orientation="h",
+                        color="count",
+                        color_continuous_scale="Reds",
+                        title=f"Top Adverse Events for {drug.title()}")
+            st.plotly_chart(fig, use_container_width=True)
