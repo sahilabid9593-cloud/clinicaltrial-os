@@ -26,4 +26,11 @@ def fetch_trials(disease="diabetes", max_results=200):
     return data
 
 if __name__ == "__main__":
-    fetch_trials("diabetes")
+    diseases = [
+    "diabetes", "cancer", "hypertension",
+    "alzheimer", "asthma", "covid",
+    "obesity", "depression", "parkinson",
+    "multiple sclerosis"
+]
+for disease in diseases:
+    fetch_trials(disease, max_results=500)

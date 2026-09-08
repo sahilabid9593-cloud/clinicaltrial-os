@@ -55,4 +55,11 @@ def insert_trials(disease="diabetes"):
     print(f"Done. {count} trials saved to database.")
 
 if __name__ == "__main__":
-    insert_trials("diabetes")
+    diseases = [
+        "diabetes", "cancer", "hypertension",
+        "alzheimer", "asthma", "covid",
+        "obesity", "depression", "parkinson",
+        "multiple sclerosis"
+    ]
+    for disease in diseases:
+        insert_trials(disease)
