@@ -26,10 +26,12 @@ def build_graph():
             G.add_node(sponsor, type="sponsor")
             G.add_edge(sponsor, nct_id, relation="sponsors")
         
-        # Connect trial to disease
-        if disease:
-            G.add_node(disease, type="disease")
-            G.add_edge(nct_id, disease, relation="studies")
+        # Connect trial to disease (a trial can belong to several)
+        for d in (disease or "").split(";"):
+            d = d.strip()
+            if d:
+                G.add_node(d, type="disease")
+                G.add_edge(nct_id, d, relation="studies")
         
         # Connect trial to phase
         if phase:

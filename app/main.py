@@ -11,6 +11,7 @@ from modules.knowledge_graph import build_graph, find_sponsor_trials, get_graph_
 from modules.document_generator import generate_report
 from modules.recruitment_prediction import predict_recruitment
 from modules.site_selection import render_site_selection_page
+from modules.trial_explorer import render_trial_explorer_page
 
 st.set_page_config(
     page_title="ClinicalTrial OS",
@@ -72,32 +73,7 @@ if page == "🏠 Home":
 
 # ─── SEARCH TRIALS ───
 elif page == "🔍 Search Trials":
-    st.title("🔍 Search Clinical Trials")
-    st.markdown("---")
-
-    col1, col2 = st.columns([3,1])
-    with col1:
-        search = st.text_input("Search by disease", "diabetes")
-    with col2:
-        status_filter = st.selectbox("Status", 
-            ["ALL", "COMPLETED", "RECRUITING", "ACTIVE_NOT_RECRUITING"])
-
-    if st.button("Search", type="primary"):
-        conn = sqlite3.connect("database/trials.db")
-        if status_filter == "ALL":
-            df = pd.read_sql("""
-                SELECT nct_id, title, status, phase, sponsor, enrollment
-                FROM trials WHERE disease LIKE ?
-            """, conn, params=[f"%{search}%"])
-        else:
-            df = pd.read_sql("""
-                SELECT nct_id, title, status, phase, sponsor, enrollment
-                FROM trials WHERE disease LIKE ? AND status=?
-            """, conn, params=[f"%{search}%", status_filter])
-        conn.close()
-
-        st.success(f"Found {len(df)} trials")
-        st.dataframe(df, use_container_width=True)
+    render_trial_explorer_page()  
 
 # ─── PROTOCOL INTELLIGENCE ───
 elif page == "🧠 Protocol Intelligence":
