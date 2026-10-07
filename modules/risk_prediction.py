@@ -90,3 +90,4 @@ def predict_risk(phase, enrollment, sponsor_name):
 if __name__ == "__main__":
     predict_risk("PHASE3", 500, "Small Biotech Inc")
     predict_risk("PHASE1", 50, "Pfizer")
+    

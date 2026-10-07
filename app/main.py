@@ -10,7 +10,7 @@ from modules.protocol_intelligence import analyze_protocol
 from modules.knowledge_graph import build_graph, find_sponsor_trials, get_graph_stats
 from modules.document_generator import generate_report
 from modules.recruitment_prediction import predict_recruitment
-from modules.site_selection import rank_sites
+from modules.site_selection import render_site_selection_page
 
 st.set_page_config(
     page_title="ClinicalTrial OS",
@@ -201,18 +201,7 @@ elif page == "📈 Recruitment Prediction":
 
 # ─── SITE SELECTION ───
 elif page == "🏥 Site Selection":
-    st.title("🏥 Site Selection")
-    st.markdown("Find the best sites to run your trial")
-    st.markdown("---")
-
-    disease = st.text_input("Disease area", "diabetes")
-    
-    if st.button("Rank Sites", type="primary"):
-        with st.spinner("Analyzing sites..."):
-            df = rank_sites(disease)
-        st.success(f"Top sites for {disease} trials")
-        st.dataframe(df, use_container_width=True)
-
+    render_site_selection_page()
 # ─── ANALYTICS ───
 elif page == "📊 Analytics":
     st.title("📊 Trial Analytics")
