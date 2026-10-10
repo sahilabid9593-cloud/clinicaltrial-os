@@ -1,129 +1,155 @@
+"""
+ClinicalTrial OS - Trial Report Generator (v2)
+Builds a PDF report in memory (works on Streamlit Cloud) with design,
+eligibility, outcomes, sites and registry quality. AI summary is optional.
+"""
+import io
+import json
 import sqlite3
-import requests
-import os
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from datetime import date
+from xml.sax.saxutils import escape
+
+import pandas as pd
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-def generate_summary(title, phase, sponsor, status, eligibility):
-    print("AI writing summary... please wait...")
-    prompt = f"""Write a professional 2-paragraph executive summary for this clinical trial.
-Use formal clinical research language.
+from modules.llm import ask_llm
 
-Trial Title: {title}
-Phase: {phase}
-Sponsor: {sponsor}
-Status: {status}
-Eligibility: {eligibility[:1000]}
+DB_PATH = "database/trials.db"
+NAVY = colors.HexColor("#1a3a5c")
 
-Write only the 2 paragraphs. No headings. No extra text."""
 
-    response = requests.post(
-        "http://localhost:11434/api/generate",
-        json={
-            "model": "llama3.2",
-            "prompt": prompt,
-            "stream": False
-        }
-    )
-    return response.json()["response"]
+def _v(x, default="Not reported"):
+    if x is None or (isinstance(x, float) and pd.isna(x)) or str(x).strip() in ("", "NA", "N/A"):
+        return default
+    s = str(x)
+    return s.replace("_", " ").title() if s.isupper() else s
 
-def generate_report(nct_id):
-    conn = sqlite3.connect("database/trials.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT nct_id, title, status, phase, sponsor, 
-               enrollment, start_date, eligibility 
-        FROM trials WHERE nct_id=?
-    """, (nct_id,))
-    row = cursor.fetchone()
+
+def _p(text, style):
+    return Paragraph(escape(str(text)).replace("\n", "<br/>"), style)
+
+
+def ai_summary(t):
+    prompt = f"""Write a factual 2-paragraph executive summary of this clinical trial for a CRO
+feasibility team. Use only the information given. No headings.
+
+Title: {t['title']}
+Phase: {t['all_phases']} | Status: {t['status']} | Sponsor: {t['sponsor']}
+Design: {t['allocation']}, {t['masking']} masking, {t['primary_purpose']}
+Enrollment: {t['enrollment']} | Sites: {t['num_sites']} in {t['num_countries']} countries
+Summary: {(t['brief_summary'] or '')[:1500]}"""
+    return ask_llm(prompt, max_tokens=600)
+
+
+def generate_report(nct_id, use_ai=True):
+    """Return (pdf_bytes, used_ai) or (None, False) if the trial is not found."""
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql("SELECT * FROM trials WHERE nct_id = ?", conn, params=[nct_id])
+    sites = pd.read_sql("""SELECT country, COUNT(*) AS sites FROM locations WHERE nct_id = ?
+                           GROUP BY country ORDER BY sites DESC LIMIT 10""", conn, params=[nct_id])
     conn.close()
+    if df.empty:
+        return None, False
+    t = df.iloc[0].to_dict()
 
-    if not row:
-        print("Trial not found")
-        return
+    summary = ai_summary(t) if use_ai else None
+    used_ai = bool(summary)
+    if not summary:
+        summary = t["brief_summary"] or "No summary reported."
 
-    nct_id, title, status, phase, sponsor, enrollment, start_date, eligibility = row
+    label = ParagraphStyle("Label", fontSize=8, fontName="Helvetica-Bold", textColor=colors.grey)
+    title = ParagraphStyle("T", fontSize=16, fontName="Helvetica-Bold", textColor=NAVY,
+                           leading=20, spaceAfter=8)
+    h = ParagraphStyle("H", fontSize=12, fontName="Helvetica-Bold", textColor=NAVY,
+                       spaceBefore=14, spaceAfter=6)
+    body = ParagraphStyle("B", fontSize=9.5, fontName="Helvetica", leading=14, spaceAfter=6)
+    cell = ParagraphStyle("C", fontSize=8.5, fontName="Helvetica", leading=11)
+    cellw = ParagraphStyle("CW", parent=cell, textColor=colors.white, fontName="Helvetica-Bold")
 
-    summary = generate_summary(title, phase, sponsor, status, eligibility)
+    def grid(rows, widths):
+        data = [[Paragraph(escape(str(a)), cellw), Paragraph(escape(str(b)), cell),
+                 Paragraph(escape(str(c)), cellw), Paragraph(escape(str(d)), cell)] for a, b, c, d in rows]
+        tb = Table(data, colWidths=widths)
+        tb.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f0f4f8")),
+            ("BACKGROUND", (0, 0), (0, -1), NAVY), ("BACKGROUND", (2, 0), (2, -1), NAVY),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"), ("PADDING", (0, 0), (-1, -1), 6),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.white)]))
+        return tb
 
-    os.makedirs("reports", exist_ok=True)
-    filename = f"reports/{nct_id}_report.pdf"
-    doc = SimpleDocTemplate(filename, pagesize=A4,
-                            rightMargin=50, leftMargin=50,
-                            topMargin=50, bottomMargin=50)
-
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('Title',
-        fontSize=18, fontName='Helvetica-Bold',
-        textColor=colors.HexColor('#1a3a5c'),
-        spaceAfter=20)
-    heading_style = ParagraphStyle('Heading',
-        fontSize=13, fontName='Helvetica-Bold',
-        textColor=colors.HexColor('#1a3a5c'),
-        spaceBefore=15, spaceAfter=8)
-    body_style = ParagraphStyle('Body',
-        fontSize=10, fontName='Helvetica',
-        leading=16, spaceAfter=10)
-    label_style = ParagraphStyle('Label',
-        fontSize=9, fontName='Helvetica-Bold',
-        textColor=colors.grey)
-
-    content = []
-
-    # Header
-    content.append(Paragraph("ClinicalTrial OS", label_style))
-    content.append(Paragraph(f"Trial Intelligence Report", title_style))
-    content.append(Spacer(1, 10))
-
-    # Trial details table
-    data = [
-        ["NCT ID", nct_id, "Status", status or "N/A"],
-        ["Phase", phase or "N/A", "Sponsor", (sponsor or "N/A")[:30]],
-        ["Enrollment", str(enrollment or "N/A"), "Start Date", start_date or "N/A"],
+    c = [
+        _p(f"ClinicalTrial OS · Trial Report · {date.today():%d %b %Y}", label),
+        Spacer(1, 6),
+        _p(t["title"], title),
+        _p(f"{t['nct_id']} · https://clinicaltrials.gov/study/{t['nct_id']}", label),
+        Spacer(1, 10),
+        grid([
+            ("Status", _v(t["status"]), "Phase", _v(t["all_phases"])),
+            ("Sponsor", _v(t["sponsor"]), "Sponsor type", _v(t["sponsor_class"])),
+            ("Enrollment", f"{_v(t['enrollment'])} ({_v(t['enrollment_type'])})", "Sites",
+             f"{int(t['num_sites'] or 0)} in {int(t['num_countries'] or 0)} countries"),
+            ("Start", _v(t["start_date"]), "Primary completion", _v(t["primary_completion_date"])),
+            ("Allocation", _v(t["allocation"]), "Masking", _v(t["masking"])),
+            ("Purpose", _v(t["primary_purpose"]), "Results posted", "Yes" if t["has_results"] else "No"),
+        ], [75, 165, 85, 165]),
+        _p("Executive summary" + (" (AI-generated)" if used_ai else " (from registry)"), h),
+        _p(summary, body),
+        _p("Interventions", h),
+        _p(_v(t["interventions"]), body),
     ]
-    table = Table(data, colWidths=[80, 150, 80, 150])
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f0f4f8')),
-        ('BACKGROUND', (0,0), (0,-1), colors.HexColor('#1a3a5c')),
-        ('BACKGROUND', (2,0), (2,-1), colors.HexColor('#1a3a5c')),
-        ('TEXTCOLOR', (0,0), (0,-1), colors.white),
-        ('TEXTCOLOR', (2,0), (2,-1), colors.white),
-        ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
-        ('FONTSIZE', (0,0), (-1,-1), 9),
-        ('PADDING', (0,0), (-1,-1), 8),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.white),
-    ]))
-    content.append(table)
-    content.append(Spacer(1, 15))
+    if t.get("why_stopped"):
+        c += [_p("Why stopped", h), _p(t["why_stopped"], body)]
 
-    # Title
-    content.append(Paragraph("Trial Title", heading_style))
-    content.append(Paragraph(title or "N/A", body_style))
+    for name, col in [("Primary outcomes", "primary_outcomes"), ("Secondary outcomes", "secondary_outcomes")]:
+        items = json.loads(t[col] or "[]")[:8]
+        if items:
+            c.append(_p(name, h))
+            for o in items:
+                c.append(_p(f"• {o['measure']}  [{o.get('timeFrame', '')}]", body))
 
-    # Executive Summary
-    content.append(Paragraph("Executive Summary", heading_style))
-    content.append(Paragraph(summary, body_style))
+    c += [_p("Eligibility", h),
+          _p(f"Age: {_v(t['min_age'], 'Any')} to {_v(t['max_age'], 'Any')} · Sex: {_v(t['sex'])}", body),
+          _p((t["eligibility"] or "Not reported")[:2500], body)]
 
-    # Eligibility
-    content.append(Paragraph("Eligibility Criteria", heading_style))
-    eligibility_text = (eligibility or "Not available")[:800]
-    content.append(Paragraph(eligibility_text, body_style))
+    if not sites.empty:
+        c.append(_p("Site footprint (top countries)", h))
+        c.append(_p(", ".join(f"{r.country} ({r.sites})" for r in sites.itertuples()), body))
 
-    # Footer
-    content.append(Spacer(1, 30))
-    content.append(Paragraph(
-        "Generated by ClinicalTrial OS — AI Platform for Clinical Research",
-        label_style))
+    try:
+        from modules.regulatory_compliance import score_trial
+        score, grade, _ = score_trial(t)
+        c += [_p("Registry quality", h), _p(f"{score:.0f}% ({grade}) on ClinicalTrial OS registry checks.", body)]
+    except Exception:
+        pass
 
-    doc.build(content)
-    print(f"\nReport saved: {filename}")
-    print("Open the reports/ folder to see your PDF")
+    c += [Spacer(1, 18),
+          _p("Source: ClinicalTrials.gov. For research and educational use only; not medical, "
+             "regulatory or legal advice. Generated by ClinicalTrial OS (open source).", label)]
 
-if __name__ == "__main__":
-    conn = sqlite3.connect("database/trials.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT nct_id FROM trials LIMIT 1")
-    row = cursor.fetchone()
-    conn.close()
+    buf = io.BytesIO()
+    SimpleDocTemplate(buf, pagesize=A4, rightMargin=45, leftMargin=45,
+                      topMargin=45, bottomMargin=45, title=f"{t['nct_id']} report").build(c)
+    return buf.getvalue(), used_ai
+
+
+def render_report_page():
+    import streamlit as st
+
+    st.title("📄 Generate Trial Report")
+    st.markdown("Create a downloadable PDF report for any trial: design, outcomes, "
+                "eligibility, site footprint and registry quality.")
+    st.markdown("---")
+
+    nct_id = st.text_input("Enter NCT ID", "NCT06589765").strip().upper()
+    if st.button("Generate PDF Report", type="primary"):
+        with st.spinner("Building report..."):
+            pdf, used_ai = generate_report(nct_id)
+        if not pdf:
+            st.warning("Trial not found in the database. Use Search Trials to find NCT IDs.")
+            return
+        st.success("Report ready" + (" (with AI summary)" if used_ai else ""))
+        st.download_button("⬇️ Download PDF", pdf, file_name=f"{nct_id}_report.pdf",
+                           mime="application/pdf", type="primary")
